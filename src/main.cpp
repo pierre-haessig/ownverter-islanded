@@ -250,7 +250,7 @@ inline void read_measurements()
 
 /* Compute sinusoidal duty cycles for each phase a,b,c 
 
-CODE TO BE MODIFIED!
+CODE TO BE MODIFIED! -> DONE
 Instruction: implement three-phase sinusoidal duty cycles
 */
 inline void compute_duties()
@@ -258,10 +258,18 @@ inline void compute_duties()
 	// Update inverter phase (∫ω(t).dt, computed with Euler approximation, modulo 2π)
 	float32_t omega = 2*PI*v_freq; // frequency conversion (Hz -> rad/s): ω = 2π.f 
 	v_angle = ot_modulo_2pi(v_angle + omega*T_control);
-	// Compute duty cycles: CODE TO BE MODIFIED!
-	duty_a = duty_amplitude;
-	duty_b = duty_amplitude;
-	duty_c = duty_amplitude;
+	// Compute duty cycles: CODE TO BE MODIFIED!  -> DONE
+	duty_a = 0.5 + duty_amplitude * ot_sin(v_angle);
+	duty_b = 0.5 + duty_amplitude * ot_sin(v_angle - 2.0/3.0*PI);
+	duty_c = 0.5 + duty_amplitude * ot_sin(v_angle - 4.0/3.0*PI);
+
+	// Square wave inverter variant
+	// if (v_angle <= PI) duty_a = 1.0;
+	// else duty_a = 0.0;
+	// if (ot_modulo_2pi(v_angle - 2.0/3.0*PI) <= PI) duty_b = 1.0;
+	// else duty_b = 0.0;
+	// if (ot_modulo_2pi(v_angle - 4.0/3.0*PI) <= PI) duty_c = 1.0;
+	// else duty_c = 0.0;
 }
 
 /**
