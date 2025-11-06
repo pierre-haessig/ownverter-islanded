@@ -18,27 +18,23 @@
  */
 
 /**
- * @brief  Application for DC/DC conversion open loop (fixed, adjustable duty cycle)
- *         using one leg of the three phase OwnVerter board.
+ * @brief  Application for islanded inverter (open loop),
+ *         with fixed, adjustable amplitude and frequency,
+ *         using the three-phase OwnVerter board.
  *
  * @author Pierre Haessig <pierre.haessig@centralesupelec.fr>
  */
-
-/* Future ideas: 
-- variable frequency
-- use output pin for sending event sync signal to scope */
 
 /* --------------OWNTECH APIs---------------------------------- */
 #include "TaskAPI.h"
 #include "ShieldAPI.h"
 #include "SpinAPI.h"
 
-#include "zephyr/console/console.h"
+/* OWNTECH CONTROL LIBRARY (including trigonometric functions) */
+#include "control_factory.h"
+#include "transform.h"
 
-// OwnVerter leg to be used: power including measurements
-#define LEG LEG1 // Leg to use
-#define V_LOW V1_LOW // Leg voltage to measure
-#define I_LOW I1_LOW // Leg current to measure
+#include "zephyr/console/console.h"
 
 /* --------------SETUP AND LOOP FUNCTIONS DECLARATION------------------- */
 
@@ -51,17 +47,29 @@ void user_interface_task();
 void status_display_task();
 /* Power converter control (critical periodic task) */
 void control_task();
+/* Compute duty cycles (subroutine of control task)*/
+void compute_duties();
+/* Read analog measurements (subroutine of control task)*/
+void read_measurements();
 
 /* -------------- VARIABLES DECLARATIONS------------------- */
 
 static const float32_t T_control = 100e-6F; // Control task period (s)
 static const uint32_t T_control_micro = (uint32_t)(T_control * 1.e6F); // Control task period (integer number of µs)
 
+/* SINUSOIDAL SIGNAL GENERATION VARIABLES */
+static float32_t v_freq = 50.0; // inverter voltage frequency (Hz)
+static float32_t v_angle = 0.0; // inverter voltage angle (rad)
+const float32_t freq_increment = 10.0; // frequency up or down increment (Hz)
+static float32_t duty_amplitude; // amplitude for sinusoidal duty cycle
+float32_t duty_increment = 0.05; // duty cycle amplitude up or down increment
+
+
 /* BOARD POWER CONVERSION STATE VARIABLES */
 
 static bool power_enable = false; // Power conversion state of the leg (PWM activation state)
-float32_t duty_cycle = 0.5; // PWM duty cycle
-float32_t duty_cycle_increment = 0.05; // PWM duty cycle up or down increment
+static float32_t duty_a, duty_b, duty_c; // three-phase PWM duty cycle (phases a, b, c)
+
 
 /* Possible modes for the OwnTech board */
 enum serial_interface_menu_mode
@@ -78,12 +86,16 @@ uint8_t received_serial_char; // Temporary storage for serial monitor character 
 
 /* Measurement variables */
 
-static float32_t V_low; // Low-side leg voltage
-static float32_t I_low; // Low-side leg current
-static float32_t I_high; // High-side voltage (DC bus)
-static float32_t V_high; // High-side current (DC bus current to the legs)
+static float32_t V_high; // High-side voltage (DC bus)
+static float32_t I_high; // High-side current (DC bus current to the legs)
+// static float32_t Va, Vb, Vc; // AC-side phase voltages
+static float32_t Ia, Ib, Ic; // AC-side phase currents
 
 static float meas_data; // Temporary storage for measured value
+
+/* V_high filter (5ms lowpass)*/
+static LowPassFirstOrderFilter vHigh_filter = controlLibFactory.lowpassfilter(T_control, 5.0e-3F);
+static float32_t V_high_filt; // High-side voltage (DC bus), smoothed by lowpass filter
 
 
 /* -------------- SETUP FUNCTION -------------------------------*/
@@ -130,13 +142,15 @@ void user_interface_task()
 	case 'h':
 		/* ----------SERIAL INTERFACE MENU----------------------- */
 
-		printk(" ________________________________________ \n"
-				"|     ------- MENU ---------             |\n"
-				"|     press i : idle mode                |\n"
-				"|     press p : power mode               |\n"
-				"|     press u : duty cycle UP            |\n"
-				"|     press j : duty cycle DOWN          |\n"
-				"|________________________________________|\n\n");
+		printk( " _________________________________________ \n"
+				"|     ------- MENU ---------              |\n"
+				"|     press i : idle mode                 |\n"
+				"|     press p : power mode                |\n"
+				"|     press u : duty cycle ampl. UP       |\n"
+				"|     press j : duty cycle ampl. DOWN     |\n"
+				"|     press f : frequency UP              |\n"
+				"|     press v : frequency DOWN            |\n"
+				"|_________________________________________|\n\n");
 
 		/* ------------------------------------------------------ */
 		break;
@@ -145,16 +159,24 @@ void user_interface_task()
 		mode = IDLE_MODE;
 		break;
 	case 'p':
-		printk("Power mode request (duty %.2f) \n", (double) duty_cycle);
+		printk("Power mode request (duty ampl. %.2f) \n", (double) duty_amplitude);
 		mode = POWER_MODE;
 		break;
 	case 'u':
-		duty_cycle += duty_cycle_increment;
-		printk("Duty cycle UP (%.2f) \n", (double) duty_cycle);
+		duty_amplitude += duty_increment;
+		printk("Duty cycle amplitude UP (%.2f) \n", (double) duty_amplitude);
 		break;
 	case 'j':
-		duty_cycle -= duty_cycle_increment;
-		printk("Duty cycle DOWN (%.2f) \n", (double) duty_cycle);
+		duty_amplitude -= duty_increment;
+		printk("Duty cycle amplitude DOWN (%.2f) \n", (double) duty_amplitude);
+		break;
+	case 'f':
+		v_freq += freq_increment;
+		printk("Frequency UP (%.2f Hz) \n", (double) v_freq);
+		break;
+	case 'v':
+		v_freq -= freq_increment;
+		printk("Frequency DOWN (%.2f Hz) \n", (double) v_freq);
 		break;
 	default:
 		break;
@@ -172,18 +194,14 @@ void status_display_task()
 	if (mode == IDLE_MODE) {
 		spin.led.turnOn(); // Constantly ON led when IDLE
 		printk("IDL: ");
-		printk("Vl %5.2f V, ", (double) V_low);
-		printk("Il %4.2f A | ", (double) I_low);
-		printk("Vh %5.2f V, ", (double) V_high);
+		printk("Vh %5.2f V, ", (double) V_high_filt);
 		printk("Ih %4.2f A, ", (double) I_high);
 		printk("\n");
 
 	} else if (mode == POWER_MODE) {
 		spin.led.toggle(); // Blinking LED when POWER
 		printk("POW: ");
-		printk("d %3.0f%%, ", (double) (duty_cycle*100));
-		printk("Vl %5.2f V, ", (double) V_low); // remark: on Ownverter, low side measurement when power is on is not usable
-		printk("Il %4.2f A | ", (double) I_low);
+		printk("da %3.0f%%, ", (double) (duty_amplitude*100));
 		printk("Vh %5.2f V, ", (double) V_high);
 		printk("Ih %4.2f A, ", (double) I_high);
 		printk("\n");
@@ -191,25 +209,28 @@ void status_display_task()
 	task.suspendBackgroundMs(200);
 }
 
-/**
- * This is the code loop of the critical task.
- * It is executed every T_control seconds (100 µs by default).
- * 
- * Actions:
- * - measure voltage and currents
- * - control the power converter leg (ON/OFF state and duty cycle)
+/* Read measurements from analog sensors, possibly applying some filters,
+   through microcontroller ADCs (Analog to Digital Converters).
+
+   Measured signals:
+   - currents: Ia, Ib, Ic, I_high
+   - voltages: V_high (with smoothed lowpass filtered version)
  */
-void control_task()
+inline void read_measurements()
 {
-	/* Retrieve sensor values */
-	meas_data = shield.sensors.getLatestValue(I_LOW);
+	meas_data = shield.sensors.getLatestValue(I1_LOW);
 	if (meas_data != NO_VALUE) {
-		I_low = meas_data;
+		Ia = meas_data;
 	}
 
-	meas_data = shield.sensors.getLatestValue(V_LOW);
+	meas_data = shield.sensors.getLatestValue(I2_LOW);
 	if (meas_data != NO_VALUE) {
-		V_low = meas_data;
+		Ib = meas_data;
+	}
+
+	meas_data = shield.sensors.getLatestValue(I3_LOW);
+	if (meas_data != NO_VALUE) {
+		Ic = meas_data;
 	}
 
 	meas_data = shield.sensors.getLatestValue(I_HIGH);
@@ -222,18 +243,59 @@ void control_task()
 		V_high = meas_data;
 	}
 
+	/* Apply filters */
+	// Smooth V_high (lowpass)
+	V_high_filt = vHigh_filter.calculateWithReturn(V_high);
+}
+
+/* Compute sinusoidal duty cycles for each phase a,b,c 
+
+CODE TO BE MODIFIED!
+Instruction: implement three-phase sinusoidal duty cycles
+*/
+inline void compute_duties()
+{
+	// Update inverter phase (∫ω(t).dt, computed with Euler approximation, modulo 2π)
+	float32_t omega = 2*PI*v_freq; // frequency conversion (Hz -> rad/s): ω = 2π.f 
+	v_angle = ot_modulo_2pi(v_angle + omega*T_control);
+	// Compute duty cycles: CODE TO BE MODIFIED!
+	duty_a = duty_amplitude;
+	duty_b = duty_amplitude;
+	duty_c = duty_amplitude;
+}
+
+/**
+ * This is the code loop of the critical task.
+ * It is executed every T_control seconds (100 µs by default).
+ * 
+ * Actions:
+ * - measure voltage and currents (in subfunction)
+ * - compute duty cycle (in subfunction)
+ * - control the power converter leg (ON/OFF state and duty cycle)
+ */
+void control_task()
+{
+	/* Retrieve sensor values */
+	read_measurements();
+
+	/* Compute sinusoidal duty cycles*/
+	compute_duties();
+
+	/* Manage POWER/IDLE modes */
 	if (mode == IDLE_MODE) {
 		if (power_enable == true) {
 			shield.power.stop(ALL);
 		}
 		power_enable = false;
 	} else if (mode == POWER_MODE) {
-		/* Set leg duty cycle */
-		shield.power.setDutyCycle(LEG, duty_cycle);
+		/* Set duty cycles of all three legs */
+		shield.power.setDutyCycle(LEG1, duty_a);
+		shield.power.setDutyCycle(LEG2, duty_b);
+		shield.power.setDutyCycle(LEG3, duty_c);
 		/* Set POWER ON */
 		if (!power_enable) {
 			power_enable = true;
-			shield.power.start(LEG);
+			shield.power.start(ALL);
 		}
 	}
 }
@@ -247,4 +309,3 @@ int main(void)
 	setup_routine();
 	return 0;
 }
-
