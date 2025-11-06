@@ -61,15 +61,13 @@ static const uint32_t T_control_micro = (uint32_t)(T_control * 1.e6F); // Contro
 static float32_t v_freq = 50.0; // inverter voltage frequency (Hz)
 static float32_t v_angle = 0.0; // inverter voltage angle (rad)
 const float32_t freq_increment = 10.0; // frequency up or down increment (Hz)
-static float32_t duty_amplitude; // amplitude for sinusoidal duty cycle
+const float32_t duty_offset = 0.50; // duty cycle offset. Should be close to 50% to offer maximal amplitude
+static float32_t duty_amplitude = 0.0; // amplitude for sinusoidal duty cycle
 float32_t duty_increment = 0.05; // duty cycle amplitude up or down increment
 
-
 /* BOARD POWER CONVERSION STATE VARIABLES */
-
 static bool power_enable = false; // Power conversion state of the leg (PWM activation state)
 static float32_t duty_a, duty_b, duty_c; // three-phase PWM duty cycle (phases a, b, c)
-
 
 /* Possible modes for the OwnTech board */
 enum serial_interface_menu_mode
@@ -259,9 +257,9 @@ inline void compute_duties()
 	float32_t omega = 2*PI*v_freq; // frequency conversion (Hz -> rad/s): ω = 2π.f 
 	v_angle = ot_modulo_2pi(v_angle + omega*T_control);
 	// Compute duty cycles: CODE TO BE MODIFIED!  -> DONE
-	duty_a = 0.5 + duty_amplitude * ot_sin(v_angle);
-	duty_b = 0.5 + duty_amplitude * ot_sin(v_angle - 2.0/3.0*PI);
-	duty_c = 0.5 + duty_amplitude * ot_sin(v_angle - 4.0/3.0*PI);
+	duty_a = duty_offset + duty_amplitude * ot_sin(v_angle);
+	duty_b = duty_offset + duty_amplitude * ot_sin(v_angle - 2.0/3.0*PI);
+	duty_c = duty_offset + duty_amplitude * ot_sin(v_angle - 4.0/3.0*PI);
 
 	// Square wave inverter variant
 	// if (v_angle <= PI) duty_a = 1.0;
