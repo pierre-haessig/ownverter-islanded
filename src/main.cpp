@@ -61,7 +61,8 @@ static const uint32_t T_control_micro = (uint32_t)(T_control * 1.e6F); // Contro
 static float32_t v_freq = 50.0; // inverter voltage frequency (Hz)
 static float32_t v_angle = 0.0; // inverter voltage angle (rad)
 const float32_t freq_increment = 10.0; // frequency up or down increment (Hz)
-static float32_t duty_amplitude; // amplitude for sinusoidal duty cycle
+const float32_t duty_offset = 0.0; // duty cycle offset
+static float32_t duty_amplitude = 0.0; // amplitude for sinusoidal duty cycle
 float32_t duty_increment = 0.05; // duty cycle amplitude up or down increment
 
 
@@ -259,9 +260,9 @@ inline void compute_duties()
 	float32_t omega = 2*PI*v_freq; // frequency conversion (Hz -> rad/s): ω = 2π.f 
 	v_angle = ot_modulo_2pi(v_angle + omega*T_control);
 	// Compute duty cycles: CODE TO BE MODIFIED!
-	duty_a = duty_amplitude;
-	duty_b = duty_amplitude;
-	duty_c = duty_amplitude;
+	duty_a = duty_offset + duty_amplitude;
+	duty_b = duty_offset + duty_amplitude;
+	duty_c = duty_offset + duty_amplitude;
 }
 
 /**
