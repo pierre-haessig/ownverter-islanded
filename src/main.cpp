@@ -61,7 +61,7 @@ static const uint32_t T_control_micro = (uint32_t)(T_control * 1.e6F); // Contro
 static float32_t v_freq = 50.0; // inverter voltage frequency (Hz)
 static float32_t v_angle = 0.0; // inverter voltage angle (rad)
 const float32_t freq_increment = 10.0; // frequency up or down increment (Hz)
-const float32_t duty_offset = 0.0; // duty cycle offset
+static float32_t duty_offset = 0.0; // duty cycle offset
 static float32_t duty_amplitude = 0.0; // amplitude for sinusoidal duty cycle
 float32_t duty_increment = 0.05; // duty cycle amplitude up or down increment
 
@@ -143,15 +143,15 @@ void user_interface_task()
 	case 'h':
 		/* ----------SERIAL INTERFACE MENU----------------------- */
 
-		printk( " _________________________________________ \n"
-				"|     ------- MENU ---------              |\n"
-				"|     press i : idle mode                 |\n"
-				"|     press p : power mode                |\n"
-				"|     press u : duty cycle ampl. UP       |\n"
-				"|     press j : duty cycle ampl. DOWN     |\n"
-				"|     press f : frequency UP              |\n"
-				"|     press v : frequency DOWN            |\n"
-				"|_________________________________________|\n\n");
+		printk( " ______________________________________________ \n"
+				"|     ------- MENU ---------                   |\n"
+				"|     press i   : idle mode                    |\n"
+				"|     press p   : power mode                   |\n"
+				"|     press u/o : duty cycle ampl./offset UP   |\n"
+				"|     press j/l : duty cycle ampl./offset DOWN |\n"
+				"|     press f   : frequency UP                 |\n"
+				"|     press v   : frequency DOWN               |\n"
+				"|______________________________________________|\n\n");
 
 		/* ------------------------------------------------------ */
 		break;
@@ -160,7 +160,7 @@ void user_interface_task()
 		mode = IDLE_MODE;
 		break;
 	case 'p':
-		printk("Power mode request (duty ampl. %.2f) \n", (double) duty_amplitude);
+		printk("Power mode request\n");
 		mode = POWER_MODE;
 		break;
 	case 'u':
@@ -170,6 +170,14 @@ void user_interface_task()
 	case 'j':
 		duty_amplitude -= duty_increment;
 		printk("Duty cycle amplitude DOWN (%.2f) \n", (double) duty_amplitude);
+		break;
+	case 'o':
+		duty_offset += duty_increment;
+		printk("Duty cycle offset UP (%.2f) \n", (double) duty_offset);
+		break;
+	case 'l':
+		duty_offset -= duty_increment;
+		printk("Duty cycle offset DOWN (%.2f) \n", (double) duty_offset);
 		break;
 	case 'f':
 		v_freq += freq_increment;
@@ -194,19 +202,24 @@ void status_display_task()
 {
 	if (mode == IDLE_MODE) {
 		spin.led.turnOn(); // Constantly ON led when IDLE
+		// Display state:
 		printk("IDL: ");
-		printk("Vh %5.2f V, ", (double) V_high_filt);
-		printk("Ih %4.2f A, ", (double) I_high);
-		printk("\n");
 
 	} else if (mode == POWER_MODE) {
 		spin.led.toggle(); // Blinking LED when POWER
+		// Display state:
 		printk("POW: ");
-		printk("da %3.0f%%, ", (double) (duty_amplitude*100));
-		printk("Vh %5.2f V, ", (double) V_high);
-		printk("Ih %4.2f A, ", (double) I_high);
-		printk("\n");
 	}
+	// Display measurements and duty cycle references:
+	printk("duty a=%3.0f%% o=%3.0f%% ",
+		(double) (duty_amplitude*100),
+		(double) (duty_offset*100)
+	);
+	printk("@%.0f Hz ", (double) v_freq);
+	printk("| ");
+	printk("Vh %5.2f V, ", (double) V_high);
+	printk("Ih %4.2f A, ", (double) I_high);
+	printk("\n");
 	task.suspendBackgroundMs(200);
 }
 
@@ -259,6 +272,7 @@ inline void compute_duties()
 	// Update inverter phase (∫ω(t).dt, computed with Euler approximation, modulo 2π)
 	float32_t omega = 2*PI*v_freq; // frequency conversion (Hz -> rad/s): ω = 2π.f 
 	v_angle = ot_modulo_2pi(v_angle + omega*T_control);
+	
 	// Compute duty cycles: CODE TO BE MODIFIED!
 	duty_a = duty_offset + duty_amplitude;
 	duty_b = duty_offset + duty_amplitude;
