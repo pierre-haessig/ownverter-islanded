@@ -109,6 +109,8 @@ void setup_routine()
 
 	/* Set the high switch convention for all legs */
 	shield.power.initBuck(ALL);
+	shield.power.setDutyCycleMin(ALL, 0.0);
+	shield.power.setDutyCycleMax(ALL, 1.0);
 
 	/* Setup all the measurements */
 	shield.sensors.enableDefaultOwnverterSensors();
