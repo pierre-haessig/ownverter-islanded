@@ -69,6 +69,7 @@ static bool square_wave = false; // whether to use square wave modulation, rathe
 /* BOARD POWER CONVERSION STATE VARIABLES */
 static bool power_enable = false; // Power conversion state of the leg (PWM activation state)
 static float32_t duty_a, duty_b, duty_c; // three-phase PWM duty cycle (phases a, b, c)
+static float32_t duty_a_prev, duty_b_prev, duty_c_prev; // three-phase PWM duty cycle (phases a, b, c)
 
 /* Possible modes for the OwnTech board */
 enum serial_interface_menu_mode
@@ -328,9 +329,22 @@ void control_task()
 		power_enable = false;
 	} else if (mode == POWER_MODE) {
 		/* Set duty cycles of all three legs */
-		shield.power.setDutyCycle(LEG1, duty_a);
-		shield.power.setDutyCycle(LEG2, duty_b);
-		shield.power.setDutyCycle(LEG3, duty_c);
+		/* Implementation variant: only call setDutyCycle if the duty cycle value actually changed,
+		to see whether there could be a bug when repeatedly calling setDutyCycle(1.0).
+		However, it seems to have no effect (bug at duty = 0.0 or 1.0 is still present)
+		*/
+		if (duty_a != duty_a_prev) {
+			shield.power.setDutyCycle(LEG1, duty_a);
+			duty_a_prev = duty_a;
+		}
+		if (duty_b != duty_b_prev) {
+			shield.power.setDutyCycle(LEG2, duty_b);
+			duty_b_prev = duty_b;
+		}
+		if (duty_c != duty_c_prev) {
+			shield.power.setDutyCycle(LEG3, duty_c);
+			duty_c_prev = duty_c;
+		}
 		/* Set POWER ON */
 		if (!power_enable) {
 			power_enable = true;
